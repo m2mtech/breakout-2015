@@ -8,9 +8,9 @@
 
 import UIKit
 
-class ViewController: UIViewController {
+class ViewController: UIViewController, UICollisionBehaviorDelegate {
 
-    struct Constants {
+    private struct Constants {
         static let BallRadius: CGFloat = 20.0
         static let BallColor = UIColor.blueColor()
         
@@ -18,16 +18,25 @@ class ViewController: UIViewController {
         static let PaddleCornerRadius: CGFloat = 5.0
         static let PaddleColor = UIColor.greenColor()
         
+        static let BrickColumns = 10
+        static let BrickRows = 8
+        static let BrickTotalWidth: CGFloat = 1.0
+        static let BrickTotalHeight: CGFloat = 0.3
+        static let BrickTopSpacing: CGFloat = 0.05
+        static let BrickSpacing: CGFloat = 5.0
+        static let BrickCornerRadius: CGFloat = 2.5
+        static let BrickColors = [UIColor.greenColor(), UIColor.blueColor(), UIColor.redColor(), UIColor.yellowColor()]
+        
         static let BoxPathName = "Box"
         static let PaddlePathName = "Paddle"
     }
     
     @IBOutlet weak var gameView: UIView!
 
-    let breakout = BreakoutBehavior()
-    lazy var animator: UIDynamicAnimator = { UIDynamicAnimator(referenceView: self.gameView) }()
+    private let breakout = BreakoutBehavior()
+    private lazy var animator: UIDynamicAnimator = { UIDynamicAnimator(referenceView: self.gameView) }()
     
-    lazy var paddle: UIView = {
+    private lazy var paddle: UIView = {
         let paddle = UIView(frame: CGRect(origin: CGPoint(x: -1, y: -1), size: Constants.PaddleSize))
         paddle.backgroundColor = Constants.PaddleColor
         paddle.layer.cornerRadius = Constants.PaddleCornerRadius
@@ -41,8 +50,64 @@ class ViewController: UIViewController {
         return paddle
     }()
     
+    private var bricks = [Int:Brick]()
+    
+    private struct Brick {
+        var relativeFrame: CGRect
+        var view: UIView
+        var action: BrickAction
+    }
+    
+    private typealias BrickAction = ((Int) -> Void)?
+    
     // MARK: - Livecycle
     
+    private func levelOne() {
+        if bricks.count > 0 { return }
+        
+        let deltaX = Constants.BrickTotalWidth / CGFloat(Constants.BrickColumns)
+        let deltaY = Constants.BrickTotalHeight / CGFloat(Constants.BrickRows)
+        var frame = CGRect(origin: CGPointZero, size: CGSize(width: deltaX, height: deltaY))
+        
+        for row in 0..<Constants.BrickRows {
+            for column in 0..<Constants.BrickColumns {
+                frame.origin.x = deltaX * CGFloat(column)
+                frame.origin.y = deltaY * CGFloat(row) + Constants.BrickTopSpacing
+                let brick = UIView(frame: frame)
+                brick.backgroundColor = Constants.BrickColors[row % Constants.BrickColors.count]
+                brick.layer.cornerRadius = Constants.BrickCornerRadius
+                brick.layer.borderColor = UIColor.blackColor().CGColor
+                brick.layer.shadowOffset = CGSize(width: 1.0, height: 1.0)
+                brick.layer.shadowOpacity = 0.1
+                
+                gameView.addSubview(brick)
+
+                var action: BrickAction = nil
+                
+                if row + 1 == Constants.BrickRows {
+                    brick.backgroundColor = UIColor.blackColor()
+                    action = { index in
+                        if brick.backgroundColor != UIColor.blackColor() {
+                            self.destroyBrickAtIndex(index)
+                        } else {
+                            NSTimer.scheduledTimerWithTimeInterval(0.05, target: self, selector: "changeBrickColor:", userInfo: brick, repeats: false)
+                        }
+                    }
+                }
+                
+                bricks[row * Constants.BrickColumns + column] = Brick(relativeFrame: frame, view: brick, action: action)
+            }
+        }
+    }
+    
+    func changeBrickColor(timer: NSTimer) {
+        if let brick = timer.userInfo as? UIView {
+            UIView.animateWithDuration(0.5, animations: { () -> Void in
+                brick.backgroundColor = UIColor.cyanColor()
+            }, completion: nil)
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         animator.addBehavior(breakout)
@@ -55,6 +120,9 @@ class ViewController: UIViewController {
         let swipeRight = UISwipeGestureRecognizer(target: self, action: "swipePaddleRight:")
         swipeRight.direction = .Right
         gameView.addGestureRecognizer(swipeRight)
+        
+        breakout.collisionDelegate = self
+        levelOne()
     }
     
     override func viewDidLayoutSubviews() {
@@ -64,9 +132,9 @@ class ViewController: UIViewController {
         rect.size.height *= 2
         breakout.addBarrier(UIBezierPath(rect: rect), named: Constants.BoxPathName)
         
-        if !CGRectContainsRect(gameView.bounds, paddle.frame) {
-            resetPaddle()
-        }
+        placeBricks()
+        
+        resetPaddle()
         
         for ball in breakout.balls {
             if !CGRectContainsRect(gameView.bounds, ball.frame) {
@@ -78,13 +146,13 @@ class ViewController: UIViewController {
     
     // MARK: - ball
     
-    func placeBall(ball: UIView) {
+    private func placeBall(ball: UIView) {
         var center = paddle.center
         center.y -= Constants.PaddleSize.height / 2 + Constants.BallRadius
         ball.center = center
     }
     
-    func createBall() -> UIView {
+    private func createBall() -> UIView {
         let ball = UIView(frame: CGRect(origin: CGPoint.zeroPoint, size: CGSize(width: Constants.BallRadius * 2.0, height: Constants.BallRadius * 2.0)))
         ball.backgroundColor = Constants.BallColor
         ball.layer.cornerRadius = Constants.BallRadius
@@ -108,19 +176,23 @@ class ViewController: UIViewController {
     
     // MARK: - paddle
 
-    func resetPaddle() {
-        paddle.center = CGPoint(x: gameView.bounds.midX, y: gameView.bounds.maxY - paddle.bounds.height)
+    private func resetPaddle() {
+        if !CGRectContainsRect(gameView.bounds, paddle.frame) {
+            paddle.center = CGPoint(x: gameView.bounds.midX, y: gameView.bounds.maxY - paddle.bounds.height)
+        } else {
+            paddle.center = CGPoint(x: paddle.center.x, y: gameView.bounds.maxY - paddle.bounds.height)
+        }
         addPaddleBarrier()
     }
 
-    func placePaddle(translation: CGPoint) {
+    private func placePaddle(translation: CGPoint) {
         var origin = paddle.frame.origin
         origin.x = max(min(origin.x + translation.x, gameView.bounds.maxX - Constants.PaddleSize.width), 0.0)
         paddle.frame.origin = origin
         addPaddleBarrier()
     }
     
-    func addPaddleBarrier() {
+    private func addPaddleBarrier() {
         breakout.addBarrier(UIBezierPath(roundedRect: paddle.frame, cornerRadius: Constants.PaddleCornerRadius), named: Constants.PaddlePathName)
     }
     
@@ -149,6 +221,46 @@ class ViewController: UIViewController {
         default: break
         }
     }
+    
+    // MARK: - bricks
 
+    private func placeBricks() {
+        for (index, brick) in bricks {
+            brick.view.frame.origin.x = brick.relativeFrame.origin.x * gameView.bounds.width
+            brick.view.frame.origin.y = brick.relativeFrame.origin.y * gameView.bounds.height
+            brick.view.frame.size.width = brick.relativeFrame.width * gameView.bounds.width
+            brick.view.frame.size.height = brick.relativeFrame.height * gameView.bounds.height
+            brick.view.frame = CGRectInset(brick.view.frame, Constants.BrickSpacing, Constants.BrickSpacing)
+            breakout.addBarrier(UIBezierPath(roundedRect: brick.view.frame, cornerRadius: Constants.BrickCornerRadius), named: index)
+        }
+    }
+    
+    func collisionBehavior(behavior: UICollisionBehavior, beganContactForItem item: UIDynamicItem, withBoundaryIdentifier identifier: NSCopying, atPoint p: CGPoint) {
+        if let index = identifier as? Int {
+            if let action = bricks[index]?.action {
+                action(index)
+            } else {
+                destroyBrickAtIndex(index)
+            }
+        }
+    }
+    
+    private func destroyBrickAtIndex(index: Int) {
+        breakout.removeBarrier(index)
+        if let brick = bricks[index] {
+            UIView.transitionWithView(brick.view, duration: 0.2, options: .TransitionFlipFromBottom, animations: {
+                brick.view.alpha = 0.5
+                }, completion: { (success) -> Void in
+                    self.breakout.addBrick(brick.view)
+                    UIView.animateWithDuration(1.0, animations: {
+                        brick.view.alpha = 0.0
+                        }, completion: { (success) -> Void in
+                            self.breakout.removeBrick(brick.view)
+                            brick.view.removeFromSuperview()
+                    })
+            })
+            bricks.removeValueForKey(index)
+        }
+    }
 }
 

@@ -10,7 +10,14 @@ import UIKit
 
 class BreakoutBehavior: UIDynamicBehavior {
     
-    lazy var collider: UICollisionBehavior = {
+    private let gravity = UIGravityBehavior()
+
+    var collisionDelegate: UICollisionBehaviorDelegate? {
+        get { return collider.collisionDelegate }
+        set { collider.collisionDelegate = newValue }
+    }
+    
+    private lazy var collider: UICollisionBehavior = {
         let lazilyCreatedCollider = UICollisionBehavior()
         lazilyCreatedCollider.action = {
             for ball in self.balls {
@@ -22,7 +29,7 @@ class BreakoutBehavior: UIDynamicBehavior {
         return lazilyCreatedCollider
         }()
     
-    lazy var ballBehavior: UIDynamicItemBehavior = {
+    private lazy var ballBehavior: UIDynamicItemBehavior = {
         let lazilyCreatedBallBehavior = UIDynamicItemBehavior()
         lazilyCreatedBallBehavior.allowsRotation = false
         lazilyCreatedBallBehavior.elasticity = 1.0
@@ -33,6 +40,7 @@ class BreakoutBehavior: UIDynamicBehavior {
     
     override init() {
         super.init()
+        addChildBehavior(gravity)
         addChildBehavior(collider)
         addChildBehavior(ballBehavior)
     }
@@ -68,9 +76,21 @@ class BreakoutBehavior: UIDynamicBehavior {
         addChildBehavior(push)
     }
     
-    func addBarrier(path: UIBezierPath, named name: String) {
-        collider.removeBoundaryWithIdentifier(name)
+    func addBarrier(path: UIBezierPath, named name: NSCopying) {
+        removeBarrier(name)
         collider.addBoundaryWithIdentifier(name, forPath: path)
+    }
+
+    func removeBarrier(name: NSCopying) {
+        collider.removeBoundaryWithIdentifier(name)
+    }
+    
+    func addBrick(brick: UIView) {
+        gravity.addItem(brick)
+    }
+
+    func removeBrick(brick: UIView) {
+        gravity.removeItem(brick)
     }
 
 }
