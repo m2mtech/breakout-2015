@@ -18,8 +18,8 @@ class ViewController: UIViewController, UICollisionBehaviorDelegate {
         static let PaddleCornerRadius: CGFloat = 5.0
         static let PaddleColor = UIColor.greenColor()
         
-        static let BrickColumns = 10
-        static let BrickRows = 8
+        static let BrickColumns = 5
+        static let BrickRows = 4
         static let BrickTotalWidth: CGFloat = 1.0
         static let BrickTotalHeight: CGFloat = 0.3
         static let BrickTopSpacing: CGFloat = 0.05
@@ -106,6 +106,18 @@ class ViewController: UIViewController, UICollisionBehaviorDelegate {
                 brick.backgroundColor = UIColor.cyanColor()
             }, completion: nil)
         }
+    }
+    
+    private func levelFinished() {
+        for ball in breakout.balls {
+            breakout.removeBall(ball)
+        }
+
+        let alertController = UIAlertController(title: "Game Over", message: "", preferredStyle: .Alert)
+        alertController.addAction(UIAlertAction(title: "Play Again", style: .Default, handler: { (action) in
+            self.levelOne()
+        }))
+        presentViewController(alertController, animated: true, completion: nil)        
     }
 
     override func viewDidLoad() {
@@ -257,6 +269,9 @@ class ViewController: UIViewController, UICollisionBehaviorDelegate {
                         }, completion: { (success) -> Void in
                             self.breakout.removeBrick(brick.view)
                             brick.view.removeFromSuperview()
+                            if self.bricks.count == 0 {
+                                self.levelFinished()
+                            }
                     })
             })
             bricks.removeValueForKey(index)
