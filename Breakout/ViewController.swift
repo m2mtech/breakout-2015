@@ -8,7 +8,7 @@
 
 import UIKit
 
-class ViewController: UIViewController, UICollisionBehaviorDelegate {
+class ViewController: UIViewController, UICollisionBehaviorDelegate, UIAlertViewDelegate {
 
     private struct Constants {
         static let BallRadius: CGFloat = 20.0
@@ -33,7 +33,7 @@ class ViewController: UIViewController, UICollisionBehaviorDelegate {
     
     @IBOutlet weak var gameView: UIView!
 
-    private let breakout = BreakoutBehavior()
+    private var breakout = BreakoutBehavior()
     private lazy var animator: UIDynamicAnimator = { UIDynamicAnimator(referenceView: self.gameView) }()
     
     private lazy var paddle: UIView = {
@@ -60,17 +60,19 @@ class ViewController: UIViewController, UICollisionBehaviorDelegate {
     
     private typealias BrickAction = ((Int) -> Void)?
     
+    private var autoStartTimer: NSTimer?
+    
     // MARK: - Livecycle
     
     private func levelOne() {
         if bricks.count > 0 { return }
         
-        let deltaX = Constants.BrickTotalWidth / CGFloat(Constants.BrickColumns)
-        let deltaY = Constants.BrickTotalHeight / CGFloat(Constants.BrickRows)
+        let deltaX = Constants.BrickTotalWidth / CGFloat(Settings().columns!)
+        let deltaY = Constants.BrickTotalHeight / CGFloat(Settings().rows!)
         var frame = CGRect(origin: CGPointZero, size: CGSize(width: deltaX, height: deltaY))
         
-        for row in 0..<Constants.BrickRows {
-            for column in 0..<Constants.BrickColumns {
+        for row in 0..<Settings().rows! {
+            for column in 0..<Settings().columns! {
                 frame.origin.x = deltaX * CGFloat(column)
                 frame.origin.y = deltaY * CGFloat(row) + Constants.BrickTopSpacing
                 let brick = UIView(frame: frame)
@@ -84,18 +86,20 @@ class ViewController: UIViewController, UICollisionBehaviorDelegate {
 
                 var action: BrickAction = nil
                 
-                if row + 1 == Constants.BrickRows {
-                    brick.backgroundColor = UIColor.blackColor()
-                    action = { index in
-                        if brick.backgroundColor != UIColor.blackColor() {
-                            self.destroyBrickAtIndex(index)
-                        } else {
-                            NSTimer.scheduledTimerWithTimeInterval(0.05, target: self, selector: "changeBrickColor:", userInfo: brick, repeats: false)
+                if Settings().difficulty == 1 {
+                    if row + 1 == Settings().rows! {
+                        brick.backgroundColor = UIColor.blackColor()
+                        action = { index in
+                            if brick.backgroundColor != UIColor.blackColor() {
+                                self.destroyBrickAtIndex(index)
+                            } else {
+                                NSTimer.scheduledTimerWithTimeInterval(0.05, target: self, selector: "changeBrickColor:", userInfo: brick, repeats: false)
+                            }
                         }
                     }
                 }
                 
-                bricks[row * Constants.BrickColumns + column] = Brick(relativeFrame: frame, view: brick, action: action)
+                bricks[row * Settings().columns! + column] = Brick(relativeFrame: frame, view: brick, action: action)
             }
         }
     }
@@ -109,20 +113,36 @@ class ViewController: UIViewController, UICollisionBehaviorDelegate {
     }
     
     private func levelFinished() {
+        autoStartTimer?.invalidate()
+        autoStartTimer = nil
         for ball in breakout.balls {
             breakout.removeBall(ball)
         }
 
-        let alertController = UIAlertController(title: "Game Over", message: "", preferredStyle: .Alert)
-        alertController.addAction(UIAlertAction(title: "Play Again", style: .Default, handler: { (action) in
-            self.levelOne()
-        }))
-        presentViewController(alertController, animated: true, completion: nil)        
+        if NSClassFromString("UIAlertController") != nil {
+            let alertController = UIAlertController(title: "Game Over", message: "", preferredStyle: .Alert)
+            alertController.addAction(UIAlertAction(title: "Play Again", style: .Default, handler: { (action) in
+                self.levelOne()
+                self.setAutoStartTimer()
+            }))
+            presentViewController(alertController, animated: true, completion: nil)
+        } else {
+            let alertView = UIAlertView(title: "Game Over", message: "asdf", delegate: self, cancelButtonTitle: "Play Again")
+            alertView.show()
+        }
+    }
+    
+    func alertView(alertView: UIAlertView, clickedButtonAtIndex buttonIndex: Int) {
+        levelOne()
+        setAutoStartTimer()
+        placeBricks()
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         animator.addBehavior(breakout)
+        
+        Settings(defaultColumns: Constants.BrickColumns, defaultRows: Constants.BrickRows, defaultBalls: 1, defaultDifficulty: 0)
         
         gameView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: "pushBall:"))
         gameView.addGestureRecognizer(UIPanGestureRecognizer(target: self, action: "panPaddle:"))
@@ -137,6 +157,52 @@ class ViewController: UIViewController, UICollisionBehaviorDelegate {
         levelOne()
     }
     
+    override func viewWillAppear(animated: Bool) {
+        super.viewWillAppear(animated)
+        if Settings().changed {
+            Settings().changed = false
+            for (index, brick) in bricks {
+                brick.view.removeFromSuperview()
+            }
+            bricks.removeAll(keepCapacity: true)
+            
+            for ball in breakout.balls {
+                ball.removeFromSuperview()
+            }
+
+            animator.removeAllBehaviors()
+            breakout = BreakoutBehavior()
+            animator.addBehavior(breakout)
+            breakout.collisionDelegate = self
+            breakout.speed = CGFloat(Settings().speed)
+
+            levelOne()
+        }
+        
+        setAutoStartTimer()
+    }
+
+    override func viewWillDisappear(animated: Bool) {
+        super.viewWillDisappear(animated)
+        autoStartTimer?.invalidate()
+        autoStartTimer = nil
+    }
+    
+    private func setAutoStartTimer() {
+        if Settings().autoStart {
+            autoStartTimer =  NSTimer.scheduledTimerWithTimeInterval(2.0, target: self, selector: "autoStart:", userInfo: nil, repeats: true)
+        }
+    }
+    
+    func autoStart(timer: NSTimer) {
+        if breakout.balls.count < Settings().balls {
+            let ball = createBall()
+            placeBall(ball)
+            breakout.addBall(ball)
+            breakout.pushBall(breakout.balls.last!)
+        }
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         
@@ -177,7 +243,7 @@ class ViewController: UIViewController, UICollisionBehaviorDelegate {
     
     func pushBall(gesture: UITapGestureRecognizer) {
         if gesture.state == .Ended {
-            if breakout.balls.count == 0 {
+            if breakout.balls.count < Settings().balls {
                 let ball = createBall()
                 placeBall(ball)
                 breakout.addBall(ball)
@@ -269,12 +335,12 @@ class ViewController: UIViewController, UICollisionBehaviorDelegate {
                         }, completion: { (success) -> Void in
                             self.breakout.removeBrick(brick.view)
                             brick.view.removeFromSuperview()
-                            if self.bricks.count == 0 {
-                                self.levelFinished()
-                            }
                     })
             })
             bricks.removeValueForKey(index)
+            if self.bricks.count == 0 {
+                self.levelFinished()
+            }
         }
     }
 }
